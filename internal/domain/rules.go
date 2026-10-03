@@ -67,30 +67,32 @@ func UpsertNodeAdmission(state *State, admission NodeAdmission) NodeAdmission {
 	return current
 }
 
+// NodeAvailable reports whether a node can receive a new lease. Quarantine is
+// a durable admission decision that blocks allocation until it is explicitly
+// lifted, regardless of the node's displayed state.
 func NodeAvailable(state *State, node ResolverNode) bool {
 	if state == nil || node.ID == "" {
 		return false
 	}
-	if node.State == NodeLeased {
+	if node.State == NodeLeased || node.State == NodeQuarantined {
 		return false
 	}
-	admission, ok := state.NodeAdmissions[node.ID]
-	if !ok {
-		return node.State == NodeReady
+	if admission, ok := state.NodeAdmissions[node.ID]; ok {
+		if admission.Quarantined {
+			return false
+		}
 	}
-	if admission.NodeID != "" && admission.NodeID != node.ID {
-		return false
-	}
-	if admission.Quarantined {
-		return false
-	}
-	return true
+	return node.State == NodeReady
 }
 
+// ApplyNodeAdmission ends the current occupancy on a node. A released,
+// reported, or expired lease can only finish the current hold: a quarantined
+// node returns to the quarantined state instead of becoming ready.
 func ApplyNodeAdmission(state *State, node *ResolverNode, occupied bool, now time.Time) {
 	if node == nil {
 		return
 	}
+	quarantined := false
 	if state != nil {
 		if admission, ok := state.NodeAdmissions[node.ID]; ok {
 			if admission.NodeName != "" {
@@ -99,11 +101,15 @@ func ApplyNodeAdmission(state *State, node *ResolverNode, occupied bool, now tim
 			if admission.Region != "" {
 				node.Region = admission.Region
 			}
+			quarantined = admission.Quarantined
 		}
 	}
-	if occupied {
+	switch {
+	case occupied:
 		node.State = NodeLeased
-	} else {
+	case quarantined:
+		node.State = NodeQuarantined
+	default:
 		node.State = NodeReady
 	}
 	node.Version++

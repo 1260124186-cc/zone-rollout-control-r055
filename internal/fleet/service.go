@@ -47,10 +47,11 @@ func (s *Service) Enroll(ctx context.Context, input domain.NodeCreateInput) (dom
 			}
 		}
 		domain.UpsertNodeAdmission(state, domain.NodeAdmission{
-			NodeID:     node.ID,
-			NodeName:   node.NodeName,
-			Region:     node.Region,
-			RecordedAt: now,
+			NodeID:      node.ID,
+			NodeName:    node.NodeName,
+			Region:      node.Region,
+			Quarantined: input.Quarantine,
+			RecordedAt:  now,
 		})
 		state.Nodes[node.ID] = node
 		store.AddAudit(state, s.ids, "node", node.ID, "enrolled", now, map[string]any{
