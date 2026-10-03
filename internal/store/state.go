@@ -42,5 +42,6 @@ func normalize(state domain.State) domain.State {
 	if state.AuditEvents == nil {
 		state.AuditEvents = []domain.AuditEvent{}
 	}
+	domain.ReconcileNodeAdmissions(&state)
 	return state
 }

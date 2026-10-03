@@ -67,24 +67,51 @@ func UpsertNodeAdmission(state *State, admission NodeAdmission) NodeAdmission {
 	return current
 }
 
+// ReconcileNodeAdmissions 以节点当前状态为准修复准入记录：隔离是持续到明确
+// 解除的准入决定，旧版本可能只把节点写成 quarantined 却未持久化准入标记，
+// 加载快照时统一补齐，使其在租约结束和后续重启后仍然保持隔离。
+func ReconcileNodeAdmissions(state *State) {
+	if state == nil {
+		return
+	}
+	if state.NodeAdmissions == nil {
+		state.NodeAdmissions = make(map[string]NodeAdmission)
+	}
+	for _, node := range state.Nodes {
+		if node.State != NodeQuarantined {
+			continue
+		}
+		admission := state.NodeAdmissions[node.ID]
+		if admission.Quarantined {
+			continue
+		}
+		admission.NodeID = node.ID
+		if admission.NodeName == "" {
+			admission.NodeName = node.NodeName
+		}
+		if admission.Region == "" {
+			admission.Region = node.Region
+		}
+		admission.Quarantined = true
+		state.NodeAdmissions[node.ID] = admission
+	}
+}
+
 func NodeAvailable(state *State, node ResolverNode) bool {
 	if state == nil || node.ID == "" {
 		return false
 	}
-	if node.State == NodeLeased {
+	if node.State != NodeReady {
 		return false
 	}
 	admission, ok := state.NodeAdmissions[node.ID]
 	if !ok {
-		return node.State == NodeReady
+		return true
 	}
 	if admission.NodeID != "" && admission.NodeID != node.ID {
 		return false
 	}
-	if admission.Quarantined {
-		return false
-	}
-	return true
+	return !admission.Quarantined
 }
 
 func ApplyNodeAdmission(state *State, node *ResolverNode, occupied bool, now time.Time) {
@@ -105,6 +132,11 @@ func ApplyNodeAdmission(state *State, node *ResolverNode, occupied bool, now tim
 		node.State = NodeLeased
 	} else {
 		node.State = NodeReady
+		if state != nil {
+			if admission, ok := state.NodeAdmissions[node.ID]; ok && admission.Quarantined {
+				node.State = NodeQuarantined
+			}
+		}
 	}
 	node.Version++
 	node.UpdatedAt = now.UTC()
